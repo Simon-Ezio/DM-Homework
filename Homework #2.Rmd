@@ -1,0 +1,177 @@
+---
+title: 'Homework #2'
+author: "Ximu Wang"
+date: "2019/1/21"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Question #1
+#### Import data.
+```{r}
+dm <- read.csv("DIRECT_MARKETING.csv")
+head(dm)
+```
+So, the response variable is "AmountSpent", the predictor variables are "Age", "Gender", "OwnHome", "Married", "Location", "Salary", "Children", "History" and "Catalogs".
+
+## Question #2
+#### Handle missing values.
+```{r}
+sum(is.na(dm$Age))
+sum(is.na(dm$Gender))
+sum(is.na(dm$OwnHome))
+sum(is.na(dm$Married))
+sum(is.na(dm$Location))
+sum(is.na(dm$Salary))
+sum(is.na(dm$Children))
+sum(is.na(dm$History))
+sum(is.na(dm$Catalogs))
+sum(is.na(dm$AmountSpent))
+```
+We can see only "History" has missing values, so we fill NA with "Unknow"
+```{r}
+levels(dm$History)[4] <- "Unknow"
+levels(dm$History)
+dm[is.na(dm$History), "History"] <- "Unknow"
+```
+
+#### Transfer the data to numerics.
+```{r}
+dm[, c("Age", "Gender", "OwnHome", "Married", "Location", "History")] <- lapply(dm[, c("Age", "Gender", "OwnHome", "Married", "Location", "History")], as.factor)
+dm[, c("Age", "Gender", "OwnHome", "Married", "Location", "History")] <- lapply(dm[, c("Age", "Gender", "OwnHome", "Married", "Location", "History")], as.numeric)
+```
+
+#### Summary of the data.
+```{r}
+summ <- lapply(dm, function(x) rbind(mean = mean(x),
+                                     sd = sd(x),
+                                     median = median(x),
+                                     quan_1 = quantile(x, 0.25),
+                                     quan_3 = quantile(x, 0.75)))
+summ_df <- data.frame(summ)
+names(summ_df) <- c("Age", "Gender", "OwnHome", "Married", "Location", "Salary", "Children", "History", "Catalogs", "AmountSpent")
+summ_df
+```
+#### Plot the density distribution of the AmountSpent and Salary variables.
+```{r}
+library(ggplot2)
+ggplot(dm, aes(x = dm$AmountSpent)) + geom_density()
+ggplot(dm, aes(x = dm$Salary)) + geom_density()
+```
+
+They have a shape of left skewed distribution.
+
+
+#### Describe the relationship between all the continuous variables and the response variable.
+Correlation
+```{r}
+cor(dm[c("Salary", "Children", "Catalogs", "AmountSpent")])
+```
+We can see "AmountSpent" and "Salary" have the best correlation, and "AmountSpent" and "Children" have negative correlation.
+
+
+#### Scatter plot.
+```{r}
+plot(dm$Salary, dm$AmountSpent)
+plot(dm$Children, dm$AmountSpent)
+plot(dm$Catalogs, dm$AmountSpent)
+plot(dm$Age, dm$AmountSpent)
+plot(dm$Gender, dm$AmountSpent)
+plot(dm$OwnHome, dm$AmountSpent)
+plot(dm$Married, dm$AmountSpent)
+plot(dm$Location, dm$AmountSpent)
+plot(dm$History, dm$AmountSpent)
+```
+
+
+#### For each categorical variable, generate a conditional density plot of the response variable.
+```{r}
+ggplot(dm, aes(x = dm$AmountSpent, fill = as.factor(dm$Catalogs))) + geom_density()
+```
+## Question #3
+#### Multiple linear regression model.
+```{r}
+dm_lm <- lm(AmountSpent ~ Age + Gender + OwnHome + Married + Location + Salary + Children + History + Catalogs, data = dm)
+summary(dm_lm)
+```
+We can see "Location", "Salary", "Children", "History" and "Catalogs" are all statistically significant, because their p-values <= .05.
+This model indicates that the predictor variables account for 66% of the variance.
+#### AIC
+```{r}
+library(MASS)
+dm_lm_stepwise <- stepAIC(dm_lm, direction = "backward")
+summary(dm_lm_stepwise)
+```
+
+The AIC of the last model is less than the original one, so it's performance is better than the original model.
+
+#### Prepare for LASSO and Ridge.
+```{r}
+library(rsample)
+library(glmnet)
+
+amount_train_test_split <- initial_split(dm, prop = 0.80)
+amount_train_tbl <- training(amount_train_test_split)
+amount_test_tbl <- testing(amount_train_test_split)
+
+amount_vars_train <- amount_train_tbl[, c("Age", "Gender", "OwnHome", "Married", "Location", "Salary", "Children", "History", "Catalogs")]
+amount_vars_test <- amount_test_tbl[, c("Age", "Gender", "OwnHome", "Married", "Location", "Salary", "Children", "History", "Catalogs")]
+
+amount_target_train <- amount_train_tbl[, c("AmountSpent")]
+amount_target_test <- amount_test_tbl[, c("AmountSpent")]
+```
+
+#### LASSO
+```{r}
+set.seed(1)
+amount_cv_lasso <- cv.glmnet(x = as.matrix(amount_vars_train), y = amount_target_train, alpha = 1)
+bestlam_lasso <- amount_cv_lasso$lambda.min
+lasso.pred_amount <- predict(amount_cv_lasso, s = bestlam_lasso, newx = as.matrix(amount_vars_test))
+mse_lasso <- mean((lasso.pred_amount - amount_target_test)^2)
+mse_lasso
+```
+
+
+#### Ridge
+```{r}
+amount_cv_ridge <- cv.glmnet(x = as.matrix(amount_vars_train), y = amount_target_train, alpha = 0)
+bestlam_ridge <- amount_cv_ridge$lambda.min
+ridge.pred_amount <- predict(amount_cv_ridge, s = bestlam_ridge, newx = as.matrix(amount_vars_test))
+mse_ridge <- mean((ridge.pred_amount - amount_target_test)^2)
+mse_ridge
+```
+
+The MSE of AIC.
+```{r}
+aic.pred_amount <- predict(dm_lm_stepwise, newx = as.matrix(amount_vars_test))
+mse_aic <- mean((aic.pred_amount - amount_target_test)^2)
+mse_aic
+```
+
+"Location", "Salary", "Children", "History" and "Catalogs" are all statistically significant.
+The Ridge model performed best, because it has the smallest MSE.
+
+## Question #4
+#### Polynomial model.
+```{r}
+poly.fit <- lm(AmountSpent ~ poly(Salary, degree = 10) + poly(Children, degree = 3) + poly(Catalogs, degree = 3) + poly(Age, degree = 2) + poly(Gender, degree = 1) + poly(OwnHome, degree = 1) + poly(Married, degree = 1) + poly(Location, degree = 1) + poly(History, degree = 3), data = amount_train_tbl)
+poly.pred_amount <- predict(poly.fit, newx = as.matrix(amount_vars_test))
+mse_poly <- mean((poly.pred_amount - amount_target_test)^2)
+mse_poly
+```
+We can see the MSE of polynomial model is not better than linear regression model, so it's performance is worst than linear regression model.
+The degree must less than the number of unique points, so I choose the degree for each variables seperately.
+
+#### Locfit model.
+```{r}
+library(locfit)
+
+loc.fit <- lm(AmountSpent ~ lp(Salary, nn = 0.5) + lp(Children, nn = 0.5) + lp(Catalogs, nn = 0.5) + lp(Age, nn = 0.5) + lp(Gender, nn = 0.5) + lp(OwnHome, nn = 0.5) + lp(Married, nn = 0.5) + lp(Location, nn = 0.5) + lp(History, nn = 0.5), data = amount_train_tbl)
+loc.pred_amount <- predict(poly.fit, newx = as.matrix(amount_vars_test))
+mse_loc <- mean((loc.pred_amount - amount_target_test)^2)
+mse_loc
+```
+We can see the performance of locfit model is same as polynomial model.

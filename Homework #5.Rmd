@@ -1,0 +1,194 @@
+---
+title: 'Homework #5'
+author: "Ximu Wang"
+date: "2019/4/7"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Task #1
+```{r}
+library(tm)
+library(lsa)
+library(ggplot2)
+```
+### import dataset
+```{r}
+init <- read.csv('HOMEWORK_5.csv')
+head(init)
+summary(init)
+```
+we can see the four most popular topics are "rec.motorcycles"(398 documents), "rec.sport.baseball"(397 documents), "rec.sport.hockey"(397 documents) and "rec.autos"(395 documents).
+### Histogram
+```{r}
+ggplot(data = init, aes(x = Topic)) + geom_bar()
+```
+### Create corpus
+```{r}
+sub_init <- init[init$Topic == 'rec.motorcycles' | init$Topic == 'rec.sport.baseball' | init$Topic == 'rec.sport.hockey' | init$Topic == 'rec.autos',]
+```
+### Pre-process
+```{r}
+corpus <- Corpus(VectorSource(sub_init$Content))
+corpus <- tm_map(corpus, tolower)
+corpus <- tm_map(corpus, removePunctuation)
+corpus <- tm_map(corpus, removeNumbers)
+corpus <- tm_map(corpus, function(x) removeWords(x, stopwords("english")))
+corpus <- tm_map(corpus, stemDocument, language = "english")
+temp <- TermDocumentMatrix(corpus)
+termList <- findFreqTerms(temp, lowfreq = 4)#find the terms more than 4 times
+td.mat <- as.matrix(TermDocumentMatrix(corpus, list(dictionary = termList)))
+td.mat[1:5, 1:30]
+```
+
+
+### Create MDS plot
+```{r}
+dist.mat <- dist(t(as.matrix(td.mat)))
+```
+```{r}
+doc.mds <- cmdscale(dist.mat, k = 2)
+data <- data.frame(x = doc.mds[, 1], y = doc.mds[, 2], topic = sub_init$Topic, id = row.names(sub_init))
+ggplot(data, aes(x = x, y = y, color = topic)) + geom_point()
+```
+### TD-IDF weighting on term document matrix
+```{r}
+td.mat.w <- lw_tf(td.mat) * gw_idf(td.mat)
+dist.mat <- dist(t(as.matrix(td.mat.w)))
+```
+```{r}
+#generate plot
+doc.mds <- cmdscale(dist.mat, k = 2)
+data <- data.frame(x = doc.mds[, 1], y = doc.mds[, 2], topic = sub_init$Topic, id = row.names(sub_init))
+ggplot(data, aes(x = x, y = y, color = topic)) + geom_point()
+```
+### LSA on term document matrix
+```{r}
+lsa.space <- lsa(td.mat, dims = 3)
+dist.mat <- dist(t(as.textmatrix(lsa.space)))
+```
+```{r}
+#generate plot
+doc.mds <- cmdscale(dist.mat, k = 2)
+data <- data.frame(x = doc.mds[, 1], y = doc.mds[, 2], topic = sub_init$Topic, id = row.names(sub_init))
+ggplot(data, aes(x = x, y = y, color = topic)) + geom_point()
+```
+
+
+
+
+
+
+
+We can see that if we use TD-IDF weighting, the documents with "rec.autos" and "rec.motorcycles" topic will be more similar. If we use LSA, the documents with "rec.sports.baseball" and "rec.motorcycles" topic will be more similar. I think this is maybe because the first two kinds of documents has more common words, and the other two kinds of documents has more words that have similar meaning.
+
+
+## Task #2
+```{r}
+library(recommenderlab)
+```
+### Import dataset
+```{r}
+books <- read.csv('BX-Books.csv', sep = ';')
+head(books)
+summary(books)
+```
+```{r}
+books.rating <- read.csv('BX-Book-Ratings.csv', sep = ';')
+head(books.rating)
+summary(books.rating)
+```
+### Pre-process the data
+```{r}
+#find the books published from 1998
+books$Year.Of.Publication <- as.numeric(as.character(books$Year.Of.Publication))
+books.set <- books[books$Year.Of.Publication >= 1998, 'ISBN']
+#books.set
+```
+```{r}
+#Extract the rating set
+books.set <- as.character(books.set)
+books.rating$ISBN <- as.character(books.rating$ISBN)
+predata <- books.rating[books.rating$ISBN %in% books.set,]
+#predata
+```
+```{r}
+library(dplyr)
+
+gyISBN <- group_by(predata, ISBN)
+user.count <- summarise(gyISBN, count = n())
+books.select <- user.count[user.count$count >= 10, 'ISBN']
+books.select <- books.select$ISBN
+#books.select
+```
+```{r}
+gyUser <- group_by(predata, User.ID)
+books.count <- summarise(gyUser, count = n())
+user.select <- books.count[books.count$count >= 10, 'User.ID']
+user.select <- user.select$User.ID
+#user.select
+```
+```{r}
+#refine the data
+data <- predata[predata$User.ID == user.select | predata$ISBN %in% books.select,]
+#data
+```
+Create rating matrix
+```{r}
+r <- as(data, "realRatingMatrix")
+#r
+```
+```{r}
+m <- as(r, "matrix")
+#m
+```
+### Create evaluation scheme
+```{r}
+scheme <- evaluationScheme(r, method = "cross", k = 4, given = 1, goodRating = 5)
+scheme
+```
+### Algorithms
+```{r}
+algorithms <- list(
+  "random items" = list(name="RANDOM", param=NULL),
+  "popular items" = list(name="POPULAR", param=NULL),
+  "user-based CF" = list(name="UBCF", param=list(nn=50)),
+  "item-based CF" = list(name="IBCF", param=list(k=50))
+)
+```
+### Results
+```{r}
+results <- evaluate(scheme, algorithms, type = "ratings")
+results
+```
+```{r}
+plot(results, ylim = c(0,50))
+```
+
+
+
+
+
+
+We can see that these four methods have similar RMSE and MAE, but the the user-based collaborative filtering has the smallest MSE. So we can select user-based collaborating filtering as the best method.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

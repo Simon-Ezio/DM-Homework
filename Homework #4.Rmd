@@ -1,0 +1,299 @@
+---
+title: 'Homework #4'
+author: "Ximu Wang"
+date: "2019/2/16"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(e1071)
+library(mlbench)
+library(randomForest)
+library(tree)
+library(dplyr)
+library(ggplot2)
+library(glmnet)
+library(pROC)
+library(rsample)
+library(car)
+library(MASS)
+library(class)
+library(rpart)
+library(ROCR)
+library(caret)
+```
+#### Read and summary the data.
+```{r}
+telco <- read.csv("Telco-Customer-Churn.csv")
+head(telco)
+summary(telco)
+```
+#### Clean the data.
+```{r}
+sum(is.na(telco$customerID))
+sum(is.na(telco$gender))
+sum(is.na(telco$SeniorCitizen))
+sum(is.na(telco$Partner))
+sum(is.na(telco$Dependents))
+sum(is.na(telco$tenure))
+sum(is.na(telco$PhoneService))
+sum(is.na(telco$MultipleLines))
+sum(is.na(telco$InternetService))
+sum(is.na(telco$OnlineSecurity))
+sum(is.na(telco$OnlineBackup))
+sum(is.na(telco$DeviceProtection))
+sum(is.na(telco$TechSupport))
+sum(is.na(telco$StreamingTV))
+sum(is.na(telco$StreamingMovies))
+sum(is.na(telco$Contract))
+sum(is.na(telco$PaperlessBilling))
+sum(is.na(telco$PaymentMethod))
+sum(is.na(telco$MonthlyCharges))
+sum(is.na(telco$TotalCharges))
+sum(is.na(telco$Churn))
+```
+We can see there is some missing data in category "TotalCharges", so we delete the rows that have missing data. And we don't need "customerID" to predict.
+```{r}
+telco <- na.omit(telco)
+sum(is.na(telco$TotalCharges))
+telco <- telco[-1]
+```
+#### Recode the values.
+```{r}
+telco[, c("gender", "Partner", "Dependents", "PhoneService", "MultipleLines", "InternetService", "OnlineSecurity", "OnlineBackup", "DeviceProtection", "TechSupport", "StreamingTV", "StreamingMovies", "Contract", "PaperlessBilling", "PaymentMethod")] <- lapply(telco[, c("gender", "Partner", "Dependents", "PhoneService", "MultipleLines", "InternetService", "OnlineSecurity", "OnlineBackup", "DeviceProtection", "TechSupport", "StreamingTV", "StreamingMovies", "Contract", "PaperlessBilling", "PaymentMethod")], as.numeric)
+
+telco$Churn <- recode(telco$Churn, " 'Yes'=1;else=0")
+telco$Churn <- as.numeric(levels(telco$Churn)[telco$Churn])
+table(telco$Churn)
+```
+## Question #1
+#### Split train set and test set.
+```{r}
+set.seed(50)
+
+telco_train_test_split <- initial_split(telco, prop = 0.7)
+telco_train_tbl <- training(telco_train_test_split)
+telco_test_tbl <- testing(telco_train_test_split)
+```
+#### Build random forests model. Show the importance of each variables and list them from most important to least.
+```{r}
+telco_treef <- randomForest(formula = Churn ~ ., data = telco, importance = TRUE, ntree = 50)
+varImpPlot(telco_treef)
+```
+
+
+
+#### Run cv with random forests model to select feature.
+```{r}
+telco_treef_cv <- rfcv(telco[, c(1:19)], telco$Churn, cv.fold = 5, step = .5)
+with(telco_treef_cv, plot(n.var, error.cv, log="x", type="o", lwd=2,
+                    xlab="Number of Variables", ylab="Error Rate"))
+telco_treef_cv$error.cv
+```
+We can see the more variables, the error rate of the model will be less. So the 19 predictors are all optimal for this dataset.
+
+## Question #2
+### Logistic Regression
+```{r}
+telco_lr <- glm(Churn~., family = binomial, data = telco)
+summary(telco_lr)
+```
+We can see "SeniorCitizen", "tenure", "PhoneService", "InternetService", "OnlineSecurity", "OnlineProtection", "OnlineBackup", "TechSupport", "Contract", "PaperlessBilling", "MonthlyCharges" and "TotalCharges" are significient features, so we use them to do feature selection.
+#### Use LASSO to select features.
+```{r}
+lr_train_vars <- telco_train_tbl[, c(2, 5, 6, 8, 9, 10, 11, 12, 15, 16, 18, 19)]
+lr_test_vars <- telco_test_tbl[, c(2, 5, 6, 8, 9, 10, 11, 12, 15, 16, 18, 19)]
+
+lr_lasso <- cv.glmnet(x = as.matrix(lr_train_vars), y = telco_train_tbl$Churn, alpha = 1, family = "binomial")
+coef(lr_lasso, s = "lambda.min")
+```
+We can see the coefficient of "TotalCharges" are too small, so we discard it.
+#### Final logistic regression model.
+
+```{r}
+lr_train_vars <- telco_train_tbl[, c(2, 5, 6, 8, 9, 10, 11, 12, 15, 16, 18)]
+lr_test_vars <- telco_test_tbl[, c(2, 5, 6, 8, 9, 10, 11, 12, 15, 16, 18)]
+
+telco_lr <- glm(Churn ~ ., family = binomial, data = telco_train_tbl[, c(2, 5, 6, 8, 9, 10, 11, 12, 15, 16, 18, 20)])
+```
+#### Creat ROC and calculate AUC.
+```{r}
+lr_predict <- predict(telco_lr, newdata = lr_test_vars, type = "response")
+lr_roc <- roc(telco_test_tbl$Churn, lr_predict)
+lr_auc <- auc(lr_roc)
+plot(lr_roc)
+lr_auc
+```
+The auc is 0.8418
+
+
+#### The confidence of logistic regression model.
+```{r}
+ci.auc(lr_auc)
+```
+
+### kNN model
+```{r}
+telco_knn <- knn(train = lr_train_vars, test = lr_test_vars, cl = telco_train_tbl$Churn, k = 3, prob = TRUE)
+telco_knn
+```
+#### Creat ROC and calculate AUC.
+```{r}
+knn_roc <- roc(telco_test_tbl$Churn, as.numeric(telco_knn))
+knn_auc <- auc(knn_roc)
+plot(knn_roc)
+knn_auc
+```
+The auc is 0.6803
+
+
+#### The confidence of kNN model
+```{r}
+ci.auc(knn_auc)
+```
+### SVM model
+```{r}
+telco_train_tbl$SeniorCitizen <- as.factor(telco_train_tbl$SeniorCitizen)
+telco_train_tbl$PhoneService <- as.factor(telco_train_tbl$PhoneService)
+telco_train_tbl$InternetService <- as.factor(telco_train_tbl$InternetService)
+telco_train_tbl$OnlineSecurity <- as.factor(telco_train_tbl$OnlineSecurity)
+telco_train_tbl$OnlineBackup <- as.factor(telco_train_tbl$OnlineBackup)
+telco_train_tbl$DeviceProtection <- as.factor(telco_train_tbl$DeviceProtection)
+telco_train_tbl$TechSupport <- as.factor(telco_train_tbl$TechSupport)
+telco_train_tbl$Contract <- as.factor(telco_train_tbl$Contract)
+telco_train_tbl$PaperlessBilling <- as.factor(telco_train_tbl$PaperlessBilling)
+telco_train_tbl$Churn <- as.factor(telco_train_tbl$Churn)
+
+telco_svm <- svm(Churn ~ ., probability = TRUE, data = telco_train_tbl[, c(2, 5, 6, 8, 9, 10, 11, 12, 15, 16, 18, 20)])
+summary(telco_svm)
+```
+#### Create ROC and calculate AUC.
+```{r}
+lr_test_vars$SeniorCitizen <- as.factor(lr_test_vars$SeniorCitizen)
+lr_test_vars$PhoneService <- as.factor(lr_test_vars$PhoneService)
+lr_test_vars$InternetService <- as.factor(lr_test_vars$InternetService)
+lr_test_vars$OnlineSecurity <- as.factor(lr_test_vars$OnlineSecurity)
+lr_test_vars$OnlineBackup <- as.factor(lr_test_vars$OnlineBackup)
+lr_test_vars$DeviceProtection <- as.factor(lr_test_vars$DeviceProtection)
+lr_test_vars$TechSupport <- as.factor(lr_test_vars$TechSupport)
+lr_test_vars$Contract <- as.factor(lr_test_vars$Contract)
+lr_test_vars$PaperlessBilling <- as.factor(lr_test_vars$PaperlessBilling)
+telco_test_tbl$Churn <- as.factor(telco_test_tbl$Churn)
+
+svm_predict <- predict(telco_svm, lr_test_vars, probability = TRUE)
+svm_probs <- data.frame(attr(svm_predict, "probabilities"))
+
+svm_roc <- roc(telco_test_tbl$Churn, svm_probs$X1)
+svm_auc <- auc(svm_roc)
+plot(svm_roc)
+svm_auc
+```
+The auc is 0.8157
+
+#### The confidence of svm model
+```{r}
+ci.auc(svm_auc)
+```
+
+So, acording to auc, the logistic regression model performed best. I pretty confident in this model, because the 95% CI is between 0.8241 and 0.8595.
+
+### Confusion Matrix
+#### Select threshold
+```{r}
+test_target_tbl <- as.data.frame(telco_test_tbl$Churn)
+test_target_tbl$predict <- lr_predict
+
+thresholds <- data.frame(ci.thresholds(roc(test_target_tbl$`telco_test_tbl$Churn`, test_target_tbl$predict)))
+print(thresholds)
+```
+We can see when the threshold equals to 0.3, our model perform good at both specificity and sensitivity. So we choose 0.3 as threshold.
+#### Create confusion matrix
+```{r}
+test_target <- test_target_tbl$`telco_test_tbl$Churn`
+test_target_tbl <- mutate(test_target_tbl, decide = ifelse(predict >= 0.3, 1, 0))
+predicted_churn <- test_target_tbl$decide
+table(predicted_churn, test_target)
+```
+Accuracy:
+```{r}
+Accuracy <- (1132 + 441)/(1132 + 134 + 402 + 441)
+Accuracy
+```
+Precision:
+```{r}
+Precision1 <- 1132 / (1132 + 134)
+Precision1
+```
+Negative Predictive Value:
+```{r}
+NPV <- 441 / (402 + 441)
+NPV
+```
+Recall:
+```{r}
+Recall <- 1132 / (1132 + 402)
+Recall
+```
+Specificity:
+```{r}
+Specificity <- 441 / (134 + 441)
+Specificity
+```
+F-1 Score:
+```{r}
+F_1 <- 2 * Precision1 * Recall / (Precision1 + Recall)
+F_1
+```
+In the model, we have high confidence that the predicted Churn "No" is true "No", but we are not very sure about the predicted predicted Churn "Yes" is true "Yes".
+
+## Bonus Question
+#### Create lift curve
+```{r}
+telco_test_tbl$Churn <- as.numeric(telco_test_tbl$Churn)-1
+lift_tbl <- data.frame(predict = lr_predict, target = telco_test_tbl$Churn)
+lift_tbl <- lift_tbl %>% arrange(desc(predict))
+
+baserate <- mean(lift_tbl$target)
+n_test <- length(lift_tbl$target)
+ax <- 1
+ay_base <- baserate
+ay_pred <- lift_tbl$target[1]
+
+for (i in 2:n_test) {
+  ax[i] = i
+  ay_base[i] = baserate * i 
+  ay_pred[i] = ay_pred[i-1] + lift_tbl$target[i]
+}
+
+df=cbind(lift_tbl,ay_pred,ay_base)
+plot(ax,ay_pred,xlab="number of cases",ylab="number of successes",
+     main="Lift: Cum successes sorted by\n pred val/success prob")
+points(ax,ay_base,type="l")
+```
+
+
+
+#### Suggestion
+This model has a good perform at predict the Churn is "No", so I think this model can help the company to improve thier advantage, but not to remedy their disadvantage.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,84 @@
+---
+title: 'Homework #1'
+author: "Ximu Wang"
+date: "2019/1/10"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Question #1
+#### Improt data.
+```{r}
+bf <- read.csv("BlackFriday.csv")
+head(bf)
+```
+
+#### Observations and features.
+```{r}
+dim(bf)
+```
+So, there are 537577 observations and 12 features.
+
+#### Nulls.
+```{r}
+is.null(bf)
+```
+This dataset has no null.
+```{r}
+length(bf[is.na(bf)])
+```
+So, this dataset has 540285 NAs.
+
+#### Summary.
+```{r}
+summary(bf)
+```
+
+#### Summary of "Product_Category_1".
+```{r}
+summary(bf$Product_Category_1)
+```
+
+#### Datatype of "Age".
+```{r}
+typeof(bf$Age)
+```
+
+## Question #2
+#### Convert the ‘Marital_Status’ column to a factor.
+```{r}
+bf$Marital_Status <- factor(bf$Marital_Status)
+class(bf$Marital_Status)
+```
+
+## Question #3
+#### Create a histogram of the ‘Purchase’ column using ggplot2.
+```{r}
+library(ggplot2)
+ggplot(bf, aes(x=Purchase)) + geom_histogram(binwidth = 2)
+```
+
+## Question #4
+#### Create a table to analyze the ‘City_Category’ column.
+```{r}
+city.table <- table(bf$City_Category)
+city.table
+```
+## Question #5
+#### Filter the dataset where Gender = M and Marital_Status = 1. How many observations are there?
+```{r}
+dim(bf[bf$Gender == "M",][bf[bf$Gender == "M",]$Marital_Status == 1,])[1]
+```
+So, there are 164537 observations.
+
+#### Make a table of the age column. Which age group has the most observations?
+```{r}
+age.table <- table(bf$Age)
+age.table[age.table == max(age.table)]
+```
+So, group "26-35" has the most observations.

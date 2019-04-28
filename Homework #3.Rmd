@@ -1,0 +1,248 @@
+---
+title: 'Homework #3'
+author: "Ximu Wang"
+date: "2019/2/1"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r}
+library(dplyr)
+library(ggplot2)
+library(glmnet)
+library(pROC)
+library(rsample)
+library(car)
+library(MASS)
+library(class)
+library(rpart)
+library(ROCR)
+library(caret)
+```
+#### Read and summary the data.
+```{r}
+adult <- read.csv("hw3_adult.csv")
+head(adult)
+summary(adult)
+```
+#### Handle missing values.
+```{r}
+sum(is.na(adult$Age))
+sum(is.na(adult$Salary))
+sum(is.na(adult$Workclass))
+sum(is.na(adult$Fnlwgt))
+sum(is.na(adult$Education))
+sum(is.na(adult$Education_num))
+sum(is.na(adult$Marital_status))
+sum(is.na(adult$Occupation))
+sum(is.na(adult$Relationship))
+sum(is.na(adult$Race))
+sum(is.na(adult$Sex))
+sum(is.na(adult$Captical_gain))
+sum(is.na(adult$Captial_loss))
+sum(is.na(adult$Hours_per_week))
+sum(is.na(adult$Native_country))
+```
+#### Recode the values.
+```{r}
+adult[, c("Workclass", "Education", "Marital_status", "Occupation", "Relationship", "Race", "Sex", "Native_country")] <- lapply(adult[, c("Workclass", "Education", "Marital_status", "Occupation", "Relationship", "Race", "Sex", "Native_country")], as.numeric)
+adult$Salary <- recode(adult$Salary, " ' >50K'=1;else=0 ")
+adult$Salary <- as.numeric(levels(adult$Salary)[adult$Salary])
+table(adult$Salary)
+```
+#### Split the dataset.
+```{r}
+set.seed(1)
+adult_train_test_split <- initial_split(adult, prop = 0.8)
+train_tbl <- training(adult_train_test_split)
+test_tbl <- testing(adult_train_test_split)
+```
+
+
+## Question #1
+#### logistic regression
+```{r}
+adult_glm <- glm(Salary ~ Age + Workclass + Fnlwgt + Education + Education_num + Marital_status + Occupation + Relationship + Race + Sex + Captical_gain + Captial_loss + Hours_per_week + Native_country, family = binomial, data = train_tbl)
+summary(adult_glm)
+```
+We can see "Age", "Education_num", "Marital_status", "Sex", "Captical_gain", "captial_loss" and "Hours_per_week" are significient features. So we use them to do feature selection.
+
+
+
+
+#### Use LASSO to select features.
+```{r}
+train_vars <- train_tbl[, c(1,5,6,10,11,12,13)]
+test_vars <- test_tbl[, c(1,5,6,10,11,12,13)]
+train_target <- train_tbl[, c("Salary")]
+test_target <- test_tbl[, c("Salary")]
+
+lasso <- cv.glmnet(x = as.matrix(train_vars), y = train_target, alpha = 1, family = "binomial")
+coef(lasso, s = "lambda.min")
+```
+
+We can see that the coefficients of "Captical_gain" and "Captial_loss" are too samll compared with other coefficients, so we discard these two features.
+And "Sex" is the most important variable, because it's coefficient bigger than 1.
+
+#### The final logistic regression model
+```{r}
+train_vars <- train_tbl[, c(1,5,6,10,13)]
+test_vars <- test_tbl[, c(1,5,6,10,13)]
+
+log_glm <- glm(Salary ~ Age + Education_num + Marital_status + Sex + Hours_per_week, family = binomial, data = train_tbl[, c(1,5,6,10,13,15)])
+```
+
+
+#### KNN model
+```{r}
+nearest3 <- knn(train = train_vars, test = test_vars, cl = train_target, k = 3, prob = TRUE)
+nearest3
+```
+
+## Question #2
+#### Evaluate the models by using AUC
+##### Logistic regression model.
+```{r}
+log_predict <- predict(log_glm, newdata = test_tbl, type = "response")
+log_roc_plot <- plot(roc(test_target, log_predict))
+log_auc <- auc(roc(test_target, log_predict))
+log_auc
+```
+We can see the logistic regression model perform pretty well.
+```{r}
+ci.auc(log_auc)
+```
+And the confident is also pretty high.
+
+##### KNN model
+```{r}
+knn_roc_plot <- plot(roc(test_target, as.numeric(nearest3)-1))
+knn_auc <- auc(roc(test_target, as.numeric(nearest3)-1))
+knn_auc
+```
+We can see the knn model do not perform better than logistic regression model.
+```{r}
+ci.auc(knn_auc)
+```
+And the confident of knn model shows above.
+
+
+## Question #3
+#### ROC and AUC for logistic regression model
+```{r}
+log_roc_plot <- plot(roc(test_target, log_predict))
+log_auc <- auc(roc(test_target, log_predict))
+log_auc
+```
+#### ROC and AUC for KNN model
+```{r}
+knn_roc_plot <- plot(roc(test_target, as.numeric(nearest3)-1))
+knn_auc <- auc(roc(test_target, as.numeric(nearest3)-1))
+knn_auc
+```
+
+Logistic regression model performs better in terms of AUC.
+
+## Question #4
+#### Logistic regression model
+```{r}
+sum(test_target)/length(test_target)
+hist(log_predict)
+```
+
+So we set the threshold as 0.3.
+```{r}
+test_target_tbl <- as.data.frame(test_target)
+test_target_tbl$predict <- log_predict
+test_target_tbl <- mutate(test_target_tbl, decide = ifelse(predict >= 0.3, 1, 0))
+```
+Create confusion matrix.
+```{r}
+predicted_salary <- test_target_tbl$decide
+table(test_target, predicted_salary)
+```
+Accuracy:
+```{r}
+Accuracy = (222 + 74)/(222 + 74 + 35 + 68)
+Accuracy
+```
+Precision:
+```{r}
+Precision = 222/(222 + 35)
+Precision
+```
+Negative predictive value:
+```{r}
+Negative_predictive_value = 74/(74 + 68)
+Negative_predictive_value
+```
+Sensitivity:
+```{r}
+Sensitivity = 222/(222 + 68)
+Sensitivity
+```
+Specificity:
+```{r}
+Specificity = 74/(74 + 35)
+Specificity
+```
+F-1 score:
+```{r}
+F_1 = 2 * Precision * Sensitivity / (Precision + Sensitivity)
+F_1
+```
+
+#### KNN
+```{r}
+predicted_salary <- nearest3
+table(test_target, predicted_salary)
+```
+Accuracy:
+```{r}
+Accuracy = (258 + 55)/(258 + 55 + 32 + 54)
+Accuracy
+```
+Precision:
+```{r}
+Precision = 258/(258 + 54)
+Precision
+```
+Negative predictive value:
+```{r}
+Negative_predictive_value = 55/(55 + 32)
+Negative_predictive_value
+```
+Sensitivity:
+```{r}
+Sensitivity = 258/(258 + 32)
+Sensitivity
+```
+Specificity:
+```{r}
+Specificity = 55/(55 + 54)
+Specificity
+```
+F-1 score:
+```{r}
+F_1 = 2 * Precision * Sensitivity / (Precision + Sensitivity)
+F_1
+```
+
+
+## Question #5
+I choose threshold based on specificity and sensitivity.
+```{r}
+thresholds <- data.frame(ci.thresholds(roc(test_target, log_predict)))
+print(thresholds)
+```
+We can see when the threshold equals to 0.3, our model perform good at both specificity and sensitivity.
+In the logistic regression model, the F-1 score, accuracy, precision, sensitivity are good, the nagetive predictive value and specificity are limited.
+In the KNN model, the accuracy, orecision, sensirivity and F-1 score are good, the nagetive predictive value, the specificity and negative predictive value are limited.
+
+
+
+
+
+
